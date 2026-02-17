@@ -26,6 +26,21 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Run checks
+      - name: Prepare Host
         run: |
-          make ci
+          sudo apt-get -qq update || true
+          sudo apt-get install -y --no-install-recommends apt-transport-https ca-certificates curl bzip2
+          curl -fsSL -o restic.bz2 https://github.com/restic/restic/releases/download/v0.15.1/restic_0.15.1_linux_amd64.bz2
+          bzip2 -d restic.bz2
+          chmod 755 restic
+          sudo mv restic /usr/bin/restic
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Test
+        run: go test -v ./...
+
+      # - name: Run checks
+      #   run: |
+      #     make ci
