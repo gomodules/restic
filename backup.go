@@ -17,6 +17,7 @@ limitations under the License.
 package restic
 
 import (
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -53,6 +54,24 @@ func (w *ResticWrapper) RunBackup(backupOption BackupOptions) ([]BackupOutput, e
 	}
 
 	return backupOutput, err
+}
+
+func (w *ResticWrapper) LeafOutput(repository string) (string, error) {
+	var idx *int
+	for i, b := range w.Config.Backends {
+		if b.Repository == repository {
+			idx = &i
+			break
+		}
+	}
+	if idx == nil {
+		return "", fmt.Errorf("repository %s not found in config", repository)
+	}
+	out, err := w.sh.CurrentOutput(*idx)
+	if err != nil {
+		return "", fmt.Errorf("error getting leaf output for repository %s: %v", repository, err)
+	}
+	return string(out), nil
 }
 
 func (w *ResticWrapper) runBackup(backupOption BackupOptions) ([]HostBackupStats, error) {
