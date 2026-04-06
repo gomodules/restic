@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -42,6 +43,11 @@ func (s *Session) UnmarshalXML(data interface{}) (err error) {
 // start command
 func (s *Session) Start() (err error) {
 	s.started = true
+	// Reset run-scoped state so repeated Start/Run/Output calls do not reuse stale buffers or pipes.
+	s.pipeWriters = make([]*io.PipeWriter, 0)
+	s.leafOutputBuffer = make([]*SafeBuffer, 0)
+	s.lastOutputBuffer = nil
+
 	if s.ShowCMD {
 		s.displayCommandChain()
 	}
@@ -56,7 +62,6 @@ func (s *Session) executeCommandChain(index int, stdin *io.PipeReader) error {
 	if index >= len(s.cmds) {
 		return nil
 	}
-
 	pipeReaders, pipeWriters := createPipes(s.determinePipeCount(index))
 
 	cmd := s.cmds[index]
@@ -84,6 +89,14 @@ func (s *Session) selectCmdStdin(index int, stdin *io.PipeReader) io.Reader {
 
 func (s *Session) configureCmdOutput(index int, pipeWriters []*io.PipeWriter) (io.Writer, io.Writer) {
 	if s.isLastCommand(index) && len(s.leafCmds) == 0 {
+		if s.enableOutputBuffer {
+			cmdOutput := &SafeBuffer{}
+			s.lastOutputBuffer = cmdOutput
+			if s.enableErrsBuffer {
+				return cmdOutput, cmdOutput
+			}
+			return cmdOutput, s.Stderr
+		}
 		return s.Stdout, s.Stderr
 	}
 
@@ -133,7 +146,7 @@ func (s *Session) selectLeafCmdStderr() io.Writer {
 
 func (s *Session) selectLeafCmdStdout() io.Writer {
 	if s.enableOutputBuffer {
-		cmdOutput := &bytes.Buffer{}
+		cmdOutput := &SafeBuffer{}
 		s.leafOutputBuffer = append(s.leafOutputBuffer, cmdOutput)
 		return cmdOutput
 	}
@@ -323,5 +336,37 @@ func (s *Session) writeCmdOutputToStdOut() error {
 			errs = append(errs, err)
 		}
 	}
+
+	if len(s.leafOutputBuffer) == 0 && s.lastOutputBuffer != nil {
+		_, err := s.Stdout.Write(s.lastOutputBuffer.Bytes())
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
 	return errors.Join(errs...)
+}
+
+// CurrentOutput returns a snapshot of command output at the given index.
+// If leaf commands exist, index maps to the leaf command index.
+// Otherwise, only index 0 is valid and returns the last command output.
+func (s *Session) CurrentOutput(index int) ([]byte, error) {
+	if len(s.leafOutputBuffer) > 0 {
+		if index < 0 || index >= len(s.leafOutputBuffer) {
+			return nil, fmt.Errorf("leaf command index %d out of range [0, %d)", index, len(s.leafOutputBuffer))
+		}
+		return s.leafOutputBuffer[index].Bytes(), nil
+	}
+
+	if s.lastOutputBuffer == nil {
+		return nil, fmt.Errorf("leaf command index %d out of range [0, 0)", index)
+	}
+	if index != 0 {
+		return nil, fmt.Errorf("leaf command index %d out of range [0, 1)", index)
+	}
+	return s.lastOutputBuffer.Bytes(), nil
+}
+
+// CurrentLeafOutput is kept for backward compatibility. Use CurrentOutput instead.
+func (s *Session) CurrentLeafOutput(index int) ([]byte, error) {
+	return s.CurrentOutput(index)
 }
