@@ -109,7 +109,7 @@ golang.org/x/text/unicode/norm
 # golang.org/x/time v0.11.0
 ## explicit; go 1.23.0
 golang.org/x/time/rate
-# gomodules.xyz/go-sh v0.2.0 => /home/anisur/go/src/gomodules/go-sh
+# gomodules.xyz/go-sh v0.2.1-0.20260424125757-2bcca2bb7421
 ## explicit; go 1.25
 gomodules.xyz/go-sh
 # google.golang.org/protobuf v1.36.6
@@ -345,4 +345,3 @@ sigs.k8s.io/structured-merge-diff/v6/value
 # sigs.k8s.io/yaml v1.6.0
 ## explicit; go 1.22
 sigs.k8s.io/yaml
-# gomodules.xyz/go-sh => /home/anisur/go/src/gomodules/go-sh

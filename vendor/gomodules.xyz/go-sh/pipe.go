@@ -18,6 +18,10 @@ var ErrExecTimeout = errors.New("execute timeout")
 
 // unmarshal shell output to decode json
 func (s *Session) UnmarshalJSON(data interface{}) (err error) {
+	oldout, oldbuf := s.Stdout, s.enableOutputBuffer
+	defer func() {
+		s.Stdout, s.enableOutputBuffer = oldout, oldbuf
+	}()
 	bufrw := bytes.NewBuffer(nil)
 	s.Stdout, s.enableOutputBuffer = bufrw, true
 	err = s.Run()
@@ -30,6 +34,10 @@ func (s *Session) UnmarshalJSON(data interface{}) (err error) {
 
 // unmarshal command output into xml
 func (s *Session) UnmarshalXML(data interface{}) (err error) {
+	oldout, oldbuf := s.Stdout, s.enableOutputBuffer
+	defer func() {
+		s.Stdout, s.enableOutputBuffer = oldout, oldbuf
+	}()
 	bufrw := bytes.NewBuffer(nil)
 	s.Stdout, s.enableOutputBuffer = bufrw, true
 	err = s.Run()
@@ -43,11 +51,6 @@ func (s *Session) UnmarshalXML(data interface{}) (err error) {
 // start command
 func (s *Session) Start() (err error) {
 	s.started = true
-	// Reset run-scoped state so repeated Start/Run/Output calls do not reuse stale buffers or pipes.
-	s.pipeWriters = make([]*io.PipeWriter, 0)
-	s.leafOutputBuffer = make([]*SafeBuffer, 0)
-	s.lastOutputBuffer = nil
-
 	if s.ShowCMD {
 		s.displayCommandChain()
 	}
@@ -69,7 +72,6 @@ func (s *Session) executeCommandChain(index int, stdin *io.PipeReader) error {
 	cmd.Stdout, cmd.Stderr = s.configureCmdOutput(index, pipeWriters)
 
 	s.pipeWriters = append(s.pipeWriters, pipeWriters...)
-
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -250,6 +252,7 @@ func Go(f func() error) chan error {
 }
 
 func (s *Session) Run() (err error) {
+	s.resetOutputBuffer()
 	if err = s.Start(); err != nil {
 		return
 	}
@@ -260,9 +263,9 @@ func (s *Session) Run() (err error) {
 }
 
 func (s *Session) Output() (out []byte, err error) {
-	oldout := s.Stdout
+	oldout, oldbuf := s.Stdout, s.enableOutputBuffer
 	defer func() {
-		s.Stdout = oldout
+		s.Stdout, s.enableOutputBuffer = oldout, oldbuf
 	}()
 	stdout := bytes.NewBuffer(nil)
 	s.Stdout = stdout
@@ -274,9 +277,9 @@ func (s *Session) Output() (out []byte, err error) {
 }
 
 func (s *Session) WriteStdout(f string) error {
-	oldout := s.Stdout
+	oldout, oldbuf := s.Stdout, s.enableOutputBuffer
 	defer func() {
-		s.Stdout = oldout
+		s.Stdout, s.enableOutputBuffer = oldout, oldbuf
 	}()
 
 	out, err := os.Create(f)
@@ -292,9 +295,9 @@ func (s *Session) WriteStdout(f string) error {
 }
 
 func (s *Session) AppendStdout(f string) error {
-	oldout := s.Stdout
+	oldout, oldbuf := s.Stdout, s.enableOutputBuffer
 	defer func() {
-		s.Stdout = oldout
+		s.Stdout, s.enableOutputBuffer = oldout, oldbuf
 	}()
 
 	out, err := os.OpenFile(f, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -310,11 +313,11 @@ func (s *Session) AppendStdout(f string) error {
 }
 
 func (s *Session) CombinedOutput() (out []byte, err error) {
-	oldout := s.Stdout
-	olderr := s.Stderr
+	oldout, olderr := s.Stdout, s.Stderr
+	oldbuf, olderrbuf := s.enableOutputBuffer, s.enableErrsBuffer
 	defer func() {
-		s.Stdout = oldout
-		s.Stderr = olderr
+		s.Stdout, s.Stderr = oldout, olderr
+		s.enableOutputBuffer, s.enableErrsBuffer = oldbuf, olderrbuf
 	}()
 	stdout := bytes.NewBuffer(nil)
 	s.Stdout = stdout
@@ -344,6 +347,15 @@ func (s *Session) writeCmdOutputToStdOut() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (s *Session) resetOutputBuffer() {
+	for _, buffer := range s.leafOutputBuffer {
+		buffer.Reset()
+	}
+	if s.lastOutputBuffer != nil {
+		s.lastOutputBuffer.Reset()
+	}
 }
 
 // CurrentOutput returns a snapshot of command output at the given index.
