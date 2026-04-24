@@ -56,7 +56,7 @@ func (w *ResticWrapper) RunBackup(backupOption BackupOptions) ([]BackupOutput, e
 	return backupOutput, err
 }
 
-func (w *ResticWrapper) LeafOutput(repository string) (string, error) {
+func (w *ResticWrapper) LeafOutput(repository string, since int) (int, []BackupStatus, error) {
 	var idx *int
 	for i, b := range w.Config.Backends {
 		if b.Repository == repository {
@@ -65,13 +65,23 @@ func (w *ResticWrapper) LeafOutput(repository string) (string, error) {
 		}
 	}
 	if idx == nil {
-		return "", fmt.Errorf("repository %s not found in config", repository)
+		return 0, nil, fmt.Errorf("repository %s not found in config", repository)
 	}
 	out, err := w.sh.CurrentOutput(*idx)
 	if err != nil {
-		return "", fmt.Errorf("error getting leaf output for repository %s: %v", repository, err)
+		return 0, nil, fmt.Errorf("error getting leaf output for repository %s: %v", repository, err)
 	}
-	return string(out), nil
+	length := len(out)
+	//fmt.Println("Lenght:", length)
+	out = out[int(math.Min(float64(since), float64(len(out)))):]
+	var status []BackupStatus
+	if len(out) != 0 {
+		status, err = extractBackupStatus(out)
+		if err != nil {
+			return 0, nil, fmt.Errorf("error extracting leaf output for repository %s: %v", repository, err)
+		}
+	}
+	return length, status, nil
 }
 
 func (w *ResticWrapper) runBackup(backupOption BackupOptions) ([]HostBackupStats, error) {

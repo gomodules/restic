@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"sync"
 	"time"
 
@@ -50,9 +51,10 @@ func main() {
 		}
 	}
 
-	randomFilePath := "random_file.bin"
+	randomFilePath := "random_5G.bin"
 
-	writeRandomFile(randomFilePath)
+	//dd if=/dev/urandom of=random_5G.bin bs=1M count=5124 status=progress
+	//writeRandomFile(randomFilePath)
 
 	pipeCommand := restic.Command{
 		Name: "cat",
@@ -60,11 +62,12 @@ func main() {
 	}
 	backupOpt := restic.BackupOptions{
 		StdinPipeCommands: []restic.Command{pipeCommand},
-		StdinFileName:     "random_file.bin",
+		StdinFileName:     randomFilePath,
 	}
+
 	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		wg.Add(1)
 		backupOut, err := w.RunBackup(backupOpt)
 		if err != nil {
 			fmt.Println("Failed to backup:", err)
@@ -77,18 +80,24 @@ func main() {
 		wg.Done()
 	}()
 
-	for {
-		out, err := w.LeafOutput("anisur")
-		if err != nil {
-			fmt.Println("Failed to get leaf output:", err)
-		} else {
-			if len(out) > 0 {
+	go func() {
+		var since int = 0
+		for {
+			length, out, err := w.LeafOutput("anisur", since)
+			if err != nil {
+				fmt.Println("Failed to get leaf output:", err)
+			} else {
+				if len(out) > 0 {
+					//fmt.Println(out)
+				}
+			}
+			if length > since {
 				fmt.Println(out)
 			}
+			since = length
+			time.Sleep(1 * time.Second)
 		}
-		time.Sleep(3 * time.Second)
-
-	}
+	}()
 
 	wg.Wait()
 
@@ -117,29 +126,20 @@ func writeRandomFile(randomFilePath string) {
 	}
 	defer file.Close()
 
-	// 2 GB in bytes
-	const fileSize = 1 * 1024 * 1024 * 1024
-	// Chunk size: 1 MB
-	const chunkSize = 1 * 1024 * 1024
+	cmd := exec.Command(
+		"dd",
+		"if=/dev/zero",
+		"of="+file.Name(),
+		"bs=1M",
+		"count=5120", // 5 GiB
+		"status=progress",
+	)
 
-	data := make([]byte, chunkSize)
-	// Fill chunk with some pattern (deterministic)
-	for i := range data {
-		data[i] = 'A' // or any deterministic pattern
-	}
-
-	written := int64(0)
-	for written < fileSize {
-		if remaining := fileSize - written; remaining < chunkSize {
-			_, err = file.Write(data[:remaining])
-			written += remaining
-		} else {
-			_, err = file.Write(data)
-			written += chunkSize
-		}
-		if err != nil {
-			panic(err)
-		}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = nil
+	err = cmd.Run()
+	if err != nil {
+		panic(err)
 	}
 	fmt.Println("Random File Write Done:", randomFilePath)
 }

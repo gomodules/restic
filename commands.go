@@ -216,7 +216,6 @@ func (w *ResticWrapper) backupFromStdin(options BackupOptions) ([]byte, error) {
 		args = b.appendMaxConnectionsFlag(args)
 		args = append(args, b.Envs)
 		command := Command{Name: ResticCMD, Args: args}
-		fmt.Println("args", args)
 		commands = append(commands, command)
 	}
 	return w.run(commands...)
