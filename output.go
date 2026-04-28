@@ -139,6 +139,7 @@ type BackupStatus struct {
 	SecondsRemaining int64    `json:"seconds_remaining"`
 	PercentDone      float64  `json:"percent_done"`
 	TotalFiles       int      `json:"total_files"`
+	TotalBytes       int      `json:"total_bytes"`
 	BytesDone        int64    `json:"bytes_done"`
 	CurrentFiles     []string `json:"current_files"`
 }
@@ -183,7 +184,6 @@ func extractLockIDs(r io.Reader) ([]string, error) {
 	return ids, sc.Err()
 }
 
-// extractBackupStatus extract the summary from the output.
 func extractBackupStatus(output []byte) ([]BackupStatus, error) {
 	data := sanitizeFromStart(output)
 	if data == nil {

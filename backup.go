@@ -72,7 +72,6 @@ func (w *ResticWrapper) LeafOutput(repository string, since int) (int, []BackupS
 		return 0, nil, fmt.Errorf("error getting leaf output for repository %s: %v", repository, err)
 	}
 	length := len(out)
-	//fmt.Println("Lenght:", length)
 	out = out[int(math.Min(float64(since), float64(len(out)))):]
 	var status []BackupStatus
 	if len(out) != 0 {
