@@ -64,35 +64,48 @@ func main() {
 		StdinPipeCommands: []restic.Command{pipeCommand},
 		StdinFileName:     randomFilePath,
 	}
+	_ = backupOpt
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		backupOut, err := w.RunBackup(backupOpt)
+		//backupOut, err := w.RunBackup(backupOpt)
+		//if err != nil {
+		//	fmt.Println("Failed to backup:", err)
+		//	return
+		//}
+		//fmt.Println("backup output:")
+		//for _, out := range backupOut {
+		//	fmt.Println(out)
+		//}
+
+		restoreOut, err := w.RunRestore("anisur", restic.RestoreOptions{
+			Snapshots:   []string{"latest"},
+			Destination: "./",
+		})
 		if err != nil {
-			fmt.Println("Failed to backup:", err)
+			fmt.Println("Failed to restore:", err)
 			return
 		}
-		fmt.Println("backup output:")
-		for _, out := range backupOut {
-			fmt.Println(out)
-		}
+		fmt.Println("restore output:", restoreOut)
+
 		wg.Done()
 	}()
 
 	go func() {
 		var since int = 0
 		for {
-			length, out, err := w.LeafOutput("anisur", since)
+			//time.Sleep(5 * time.Second)
+			length, status, err := w.StatusSince("anisur", since)
 			if err != nil {
 				fmt.Println("Failed to get leaf output:", err)
 			} else {
-				if len(out) > 0 {
+				if len(status) > 0 {
 					//fmt.Println(out)
 				}
 			}
 			if length > since {
-				fmt.Println(out)
+				fmt.Println(status)
 			}
 			since = length
 			time.Sleep(1 * time.Second)
