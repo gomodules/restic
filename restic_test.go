@@ -650,3 +650,25 @@ func newBackendResolver(b *storage.Backend) StorageConfigResolver {
 		return nil
 	}
 }
+
+func TestResticWrapperCopyDeepCopiesBackendEnvs(t *testing.T) {
+	w := &ResticWrapper{
+		Config: &SetupOptions{
+			Backends: []*Backend{
+				{
+					Repository: "repo-1",
+					Envs: map[string]string{
+						"AWS_ACCESS_KEY_ID": "key",
+					},
+				},
+			},
+		},
+	}
+
+	copied := w.Copy()
+	copied.Config.Backends[0].Envs["RESTIC_PASSWORD"] = "secret"
+
+	if got := w.Config.Backends[0].Envs["RESTIC_PASSWORD"]; got != "" {
+		t.Fatalf("wrapper copy reused backend env map, got RESTIC_PASSWORD=%q", got)
+	}
+}

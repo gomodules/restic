@@ -3,9 +3,8 @@ module gomodules.xyz/restic
 go 1.25
 
 require (
-	github.com/armon/circbuf v0.0.0-20190214190532-5111143e8da2
 	github.com/stretchr/testify v1.11.1
-	gomodules.xyz/go-sh v0.2.0
+	gomodules.xyz/go-sh v0.2.1-0.20260424125757-2bcca2bb7421
 	k8s.io/api v0.34.3
 	k8s.io/apimachinery v0.34.3
 	k8s.io/klog/v2 v2.130.1
@@ -55,3 +54,5 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+//replace gomodules.xyz/go-sh => /home/anisur/go/src/gomodules/go-sh
