@@ -391,10 +391,15 @@ func (w *ResticWrapper) run(commands ...Command) ([]byte, error) {
 	// write std errors into os.Stderr and buffer
 	var err error
 	var errBuff bytes.Buffer
-	// Create a new shell instance to avoid pollution from existing environment variables.
+	oldStderr := w.sh.Stderr
+	defer func() {
+		w.sh.Stderr = oldStderr
+	}()
 	w.sh.Stderr = io.MultiWriter(os.Stderr, &errBuff)
 	if w.Config.Timeout != nil {
 		w.sh.SetTimeout(w.Config.Timeout.Duration)
+	} else {
+		w.sh.SetTimeout(0)
 	}
 
 	isLeafCommandRequired := isLeafCommandNecessary(commands...)
@@ -416,7 +421,6 @@ func (w *ResticWrapper) run(commands ...Command) ([]byte, error) {
 	}
 
 	out, err := w.sh.Output()
-	klog.Infoln("sh-output:", string(out))
 	if err != nil {
 		return out, formatError(err, errBuff.String())
 	}
@@ -631,7 +635,7 @@ func (w *ResticWrapper) StatusSince(repository string, since int) (int, []Restic
 	}
 	out, err := w.sh.CurrentOutput(*idx)
 	if err != nil {
-		return 0, nil, fmt.Errorf("error getting leaf output for repository %s: %v", repository, err)
+		return 0, nil, fmt.Errorf("error getting leaf output for repository %s: %w", repository, err)
 	}
 	cursor, status := statusSince(out, since)
 	return cursor, status, nil
