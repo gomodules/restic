@@ -512,6 +512,77 @@ func TestVerifyRepositoryIntegrity(t *testing.T) {
 	assert.Equal(t, true, *repoStats.Integrity)
 }
 
+func TestVerifyRepositoryIntegrity_CorruptedRepositoryReturnsStats(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "stash-unit-test-")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+
+	w, err := setupTest(tempDir)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	defer cleanup(tempDir)
+
+	repository := w.Config.Backends[0].Repository
+	if err = w.InitializeRepository(repository); err != nil {
+		t.Error(err)
+		return
+	}
+
+	backupOpt := BackupOptions{
+		BackupPaths: []string{targetPath},
+	}
+	if _, err = w.RunBackup(backupOpt); err != nil {
+		t.Error(err)
+		return
+	}
+
+	deleteOnePackFile(t, localRepoDir)
+
+	repoStats, err := w.VerifyRepositoryIntegrity(repository)
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	if repoStats == nil || repoStats.Integrity == nil {
+		t.Fatalf("expected integrity stats, got %#v", repoStats)
+	}
+	assert.Equal(t, false, *repoStats.Integrity)
+}
+
+func deleteOnePackFile(t *testing.T, repositoryDir string) {
+	t.Helper()
+
+	dataDir := filepath.Join(repositoryDir, "data")
+	shardDirs, err := os.ReadDir(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, shardDir := range shardDirs {
+		if !shardDir.IsDir() {
+			continue
+		}
+		packDir := filepath.Join(dataDir, shardDir.Name())
+		packFiles, err := os.ReadDir(packDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, packFile := range packFiles {
+			if packFile.IsDir() {
+				continue
+			}
+			if err := os.Remove(filepath.Join(packDir, packFile.Name())); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+	}
+	t.Fatal("no pack file found")
+}
+
 func setupTestForMultipleBackends(tempDir string, backendsCount int) (*ResticWrapper, error) {
 	setupOpt := &SetupOptions{
 		ScratchDir:  filepath.Join(tempDir, "scratch"),
@@ -648,5 +719,27 @@ func newBackendResolver(b *storage.Backend) StorageConfigResolver {
 			return fmt.Errorf("unsupported backend type for local testing")
 		}
 		return nil
+	}
+}
+
+func TestResticWrapperCopyDeepCopiesBackendEnvs(t *testing.T) {
+	w := &ResticWrapper{
+		Config: &SetupOptions{
+			Backends: []*Backend{
+				{
+					Repository: "repo-1",
+					Envs: map[string]string{
+						"AWS_ACCESS_KEY_ID": "key",
+					},
+				},
+			},
+		},
+	}
+
+	copied := w.Copy()
+	copied.Config.Backends[0].Envs["RESTIC_PASSWORD"] = "secret"
+
+	if got := w.Config.Backends[0].Envs["RESTIC_PASSWORD"]; got != "" {
+		t.Fatalf("wrapper copy reused backend env map, got RESTIC_PASSWORD=%q", got)
 	}
 }
