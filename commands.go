@@ -398,8 +398,6 @@ func (w *ResticWrapper) run(commands ...Command) ([]byte, error) {
 	w.sh.Stderr = io.MultiWriter(os.Stderr, &errBuff)
 	if w.Config.Timeout != nil {
 		w.sh.SetTimeout(w.Config.Timeout.Duration)
-	} else {
-		w.sh.SetTimeout(0)
 	}
 
 	isLeafCommandRequired := isLeafCommandNecessary(commands...)
@@ -421,6 +419,7 @@ func (w *ResticWrapper) run(commands ...Command) ([]byte, error) {
 	}
 
 	out, err := w.sh.Output()
+	klog.Infoln("sh-output:", string(out))
 	if err != nil {
 		return out, formatError(err, errBuff.String())
 	}

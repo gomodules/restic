@@ -189,13 +189,13 @@ func extractLockIDs(r io.Reader) ([]string, error) {
 func extractStatus(output []byte) []ResticStatus {
 	data := sanitizeFromStart(output)
 	if data == nil {
-		klog.V(5).Infoln("status cannot be sanitized from start, data is not valid, ignoring it...")
+		klog.Infoln("status cannot be sanitized from start, data is not valid, ignoring it...")
 		return nil
 	}
 
 	data = sanitizeFromEnd(data)
 	if data == nil {
-		klog.V(5).Infoln("status cannot be sanitized from end, data is not valid, ignoring it...")
+		klog.Infoln("status cannot be sanitized from end, data is not valid, ignoring it...")
 		return nil
 	}
 	var results []ResticStatus
@@ -203,13 +203,15 @@ func extractStatus(output []byte) []ResticStatus {
 	for {
 		var raw json.RawMessage
 		if err := decoder.Decode(&raw); err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
-			break
+			klog.Infoln("cannot decode status JSON", "error", err)
+			continue
 		}
 		var s ResticStatus
 		if err := json.Unmarshal(raw, &s); err != nil {
+			klog.Infoln("cannot decode status JSON", "error", err)
 			continue
 		}
 		results = append(results, s)
