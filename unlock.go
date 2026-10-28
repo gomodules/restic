@@ -27,6 +27,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	lockPollInterval = 10 * time.Second
+	// lockWaitTimeout is how long an operation waits for an active exclusive lock to be released.
+	lockWaitTimeout = 1 * time.Hour
+	// pruneLockWaitTimeout is how long prune waits for the other operations to release their locks.
+	// restic treats a lock as stale 30 minutes after its last refresh, so the lock of a crashed
+	// process is removed within this period.
+	pruneLockWaitTimeout = 35 * time.Minute
+)
+
 func (w *ResticWrapper) UnlockRepository(repository string) error {
 	_, err := w.unlock(repository)
 	return err
@@ -90,72 +100,77 @@ func (w *ResticWrapper) EnsureNoExclusiveLock(rClient client.Client, namespace s
 	klog.Infoln("Ensuring repository is ready for new operation...")
 
 	for _, b := range w.Config.Backends {
-		klog.Infof("Processing repository: %s", b.Repository)
-
-		// Remove stale locks
-		klog.Infof("Removing stale locks from repository: %s", b.Repository)
-		_, err := w.unlockStale(b.Repository)
-		if err != nil {
-			klog.Warningf("Failed to remove stale locks (non-fatal): %v", err)
+		if err := w.ensureNoExclusiveLock(b.Repository); err != nil {
+			return err
 		}
-
-		// Check if any exclusive locks remain
-		// If they do, restic determined they're active (it would have removed them if stale)
-		klog.Infof("Checking for exclusive locks in repository: %s", b.Repository)
-		hasLock, podName, err := w.hasExclusiveLock(b.Repository)
-		if err != nil {
-			return fmt.Errorf("failed to check for exclusive locks in repository %s: %w", b.Repository, err)
-		}
-
-		if !hasLock {
-			klog.Infof("No exclusive lock found. Repository %s is ready.", b.Repository)
-			continue
-		}
-
-		// : Wait for the exclusive lock to be released
-		// Periodically retry unlockStale() in case the process crashes during wait
-		const lockWaitTimeout = 1 * time.Hour
-
-		klog.Infof("Exclusive lock found (held by %s). Waiting up to %v for it to be released...", podName, lockWaitTimeout)
-		err = wait.PollUntilContextTimeout(
-			context.Background(),
-			10*time.Second,
-			lockWaitTimeout,
-			true,
-			func(ctx context.Context) (bool, error) {
-				klog.Infof("Polling: checking if exclusive lock is released...")
-
-				// Try to cleanup stale locks (in case process crashed)
-				_, unlockErr := w.unlockStale(b.Repository)
-				if unlockErr != nil {
-					klog.Warningf("Failed to remove stale locks during polling: %v", unlockErr)
-				}
-
-				// Check if exclusive lock still exists
-				hasLock, currentPodName, err := w.hasExclusiveLock(b.Repository)
-				if err != nil {
-					klog.Warningf("Error checking locks during polling: %v", err)
-					return false, nil // Don't fail, retry
-				}
-
-				if !hasLock {
-					klog.Infof("Exclusive lock released. Repository is ready.")
-					return true, nil
-				}
-
-				// Lock still exists
-				klog.Infof("Exclusive lock still held by %s. Waiting...", currentPodName)
-				return false, nil
-			},
-		)
-		if err != nil {
-			return fmt.Errorf("timeout waiting for exclusive lock to be released in repository %s: %w", b.Repository, err)
-		}
-
-		klog.Infof("Repository %s is ready.", b.Repository)
 	}
 
 	klog.Infoln("All repositories are ready for new operations.")
+	return nil
+}
+
+func (w *ResticWrapper) ensureNoExclusiveLock(repository string) error {
+	klog.Infof("Processing repository: %s", repository)
+
+	// Remove stale locks
+	klog.Infof("Removing stale locks from repository: %s", repository)
+	_, err := w.unlockStale(repository)
+	if err != nil {
+		klog.Warningf("Failed to remove stale locks (non-fatal): %v", err)
+	}
+
+	// Check if any exclusive locks remain
+	// If they do, restic determined they're active (it would have removed them if stale)
+	klog.Infof("Checking for exclusive locks in repository: %s", repository)
+	hasLock, podName, err := w.hasExclusiveLock(repository)
+	if err != nil {
+		return fmt.Errorf("failed to check for exclusive locks in repository %s: %w", repository, err)
+	}
+
+	if !hasLock {
+		klog.Infof("No exclusive lock found. Repository %s is ready.", repository)
+		return nil
+	}
+
+	// : Wait for the exclusive lock to be released
+	// Periodically retry unlockStale() in case the process crashes during wait
+	klog.Infof("Exclusive lock found (held by %s). Waiting up to %v for it to be released...", podName, lockWaitTimeout)
+	err = wait.PollUntilContextTimeout(
+		context.Background(),
+		lockPollInterval,
+		lockWaitTimeout,
+		true,
+		func(ctx context.Context) (bool, error) {
+			klog.Infof("Polling: checking if exclusive lock is released...")
+
+			// Try to cleanup stale locks (in case process crashed)
+			_, unlockErr := w.unlockStale(repository)
+			if unlockErr != nil {
+				klog.Warningf("Failed to remove stale locks during polling: %v", unlockErr)
+			}
+
+			// Check if exclusive lock still exists
+			hasLock, currentPodName, err := w.hasExclusiveLock(repository)
+			if err != nil {
+				klog.Warningf("Error checking locks during polling: %v", err)
+				return false, nil // Don't fail, retry
+			}
+
+			if !hasLock {
+				klog.Infof("Exclusive lock released. Repository is ready.")
+				return true, nil
+			}
+
+			// Lock still exists
+			klog.Infof("Exclusive lock still held by %s. Waiting...", currentPodName)
+			return false, nil
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("timeout waiting for exclusive lock to be released in repository %s: %w", repository, err)
+	}
+
+	klog.Infof("Repository %s is ready.", repository)
 	return nil
 }
 

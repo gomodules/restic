@@ -31,7 +31,10 @@ func (w *ResticWrapper) RunRestore(repository string, restoreOptions RestoreOpti
 	restoreStats := HostRestoreStats{
 		Hostname: restoreOptions.Host,
 	}
-	err := w.runRestore(repository, restoreOptions)
+	err := w.ensureNoExclusiveLock(repository)
+	if err == nil {
+		err = w.runRestore(repository, restoreOptions)
+	}
 	if err != nil {
 		restoreStats.Phase = HostRestoreFailed
 		restoreStats.Error = err.Error()
@@ -93,7 +96,10 @@ func (w *ResticWrapper) Dump(repository string, dumpOptions DumpOptions) (*Resto
 		dumpOptions.SourceHost = dumpOptions.Host
 	}
 
-	_, err := w.DumpOnce(repository, dumpOptions)
+	err := w.ensureNoExclusiveLock(repository)
+	if err == nil {
+		_, err = w.DumpOnce(repository, dumpOptions)
+	}
 	if err != nil {
 		restoreStats.Phase = HostRestoreFailed
 		restoreStats.Error = err.Error()
@@ -122,6 +128,11 @@ func (w *ResticWrapper) ParallelDump(repository string, dumpOptions []DumpOption
 	)
 
 	restoreOutput := &RestoreOutput{}
+
+	// A crashed prune can leave an exclusive lock behind, which would make every dump fail.
+	if err := w.ensureNoExclusiveLock(repository); err != nil {
+		return restoreOutput, err
+	}
 
 	for i := range dumpOptions {
 		// try to send message in concurrencyLimiter channel.

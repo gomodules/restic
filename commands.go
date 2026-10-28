@@ -18,6 +18,7 @@ package restic
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 )
 
@@ -107,15 +109,36 @@ func (w *ResticWrapper) tryDeleteSnapshots(repository string, snapshotIDs []stri
 
 func (w *ResticWrapper) deleteSnapshots(repository string, snapshotIDs []string) ([]byte, error) {
 	out, err := w.tryDeleteSnapshots(repository, snapshotIDs)
-	if err == nil || !strings.Contains(err.Error(), "unlock") {
+	if err == nil || !isLockError(err) {
 		return out, err
 	}
-	// repo is locked, so unlock first
-	klog.Warningln("repo found locked, so unlocking before pruning, err:", err.Error())
-	if out, err = w.unlock(repository); err != nil {
-		return out, err
+	// The repository is locked by another operation. Never remove the active locks (i.e. "unlock --remove-all"),
+	// otherwise prune would delete the data that a running backup has just uploaded and corrupt the repository.
+	// Remove only the stale locks and wait for the active ones to be released.
+	klog.Warningf("Repository is locked. Waiting up to %v for the locks to be released before pruning, err: %s", pruneLockWaitTimeout, err.Error())
+	pollErr := wait.PollUntilContextTimeout(context.Background(), lockPollInterval, pruneLockWaitTimeout, false, func(ctx context.Context) (bool, error) {
+		if _, unlockErr := w.unlockStale(repository); unlockErr != nil {
+			klog.Warningf("Failed to remove stale locks: %v", unlockErr)
+		}
+		out, err = w.tryDeleteSnapshots(repository, snapshotIDs)
+		if err == nil {
+			return true, nil
+		}
+		if isLockError(err) {
+			klog.Infoln("Repository is still locked. Waiting...")
+			return false, nil
+		}
+		return false, err
+	})
+	if pollErr != nil && err != nil {
+		return out, fmt.Errorf("failed to prune snapshots: %w", err)
 	}
-	return w.tryDeleteSnapshots(repository, snapshotIDs)
+	return out, pollErr
+}
+
+// isLockError returns true if restic failed because the repository is locked by another operation.
+func isLockError(err error) bool {
+	return strings.Contains(err.Error(), "unlock") || strings.Contains(err.Error(), "repository is already locked")
 }
 
 func (w *ResticWrapper) repositoryExist(repository string) bool {

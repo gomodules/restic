@@ -42,5 +42,8 @@ func (w *ResticWrapper) GetSnapshotSize(repository string, snapshotID string) (u
 }
 
 func (w *ResticWrapper) DownloadSnapshot(repository string, options RestoreOptions) error {
+	if err := w.ensureNoExclusiveLock(repository); err != nil {
+		return err
+	}
 	return w.runRestore(repository, options)
 }
